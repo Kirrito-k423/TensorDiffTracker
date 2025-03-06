@@ -35,11 +35,21 @@ def get_call_stack():
     return " <- ".join(relevant_frames[:3])  # 显示最近3层调用
 
 def auto_diff(func):
-    # 获取函数定义位置信息
-    def_info = f"{os.path.basename(func.__code__.co_filename)}:{func.__code__.co_firstlineno}"
-    
     @wraps(func)
     def wrapper(*args, **kwargs):
+        # 获取类名（如果是类方法）
+        class_name = ""
+        if '.' in func.__qualname__:  # 类方法会有 MyClass.method 的qualname
+            class_name = func.__qualname__.split('.')[0] + '.'
+        
+        # 获取函数标识
+        func_identity = f"{class_name}{func.__name__}"
+
+        # 获取定义位置信息
+        def_file = os.path.basename(func.__code__.co_filename)
+        def_line = func.__code__.co_firstlineno
+        def_info = f"{def_file}:{def_line}"
+
         # 获取调用位置信息
         caller_frame = inspect.currentframe().f_back
         call_info = f"{caller_frame.f_code.co_name}:{caller_frame.f_lineno}"
@@ -49,9 +59,8 @@ def auto_diff(func):
         IndentManager.increase()
         
         try:
-            # 打印调用入口
-            print(f"{indent}┌── [{def_info}] 函数 [{func.__name__}] 被调用于 {call_info} ({get_call_stack()})")
-            
+            # 打印带类名的调用入口
+            print(f"{indent}┌── [{def_info}] 函数 [{func_identity}] 被调用于 {call_info} ({get_call_stack()})")
             # 参数追踪
             sig = inspect.signature(func)
             bound_params = sig.bind(*args, **kwargs)
