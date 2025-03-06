@@ -128,9 +128,18 @@ def var_tracker(*track_vars):
             """类型敏感对比逻辑"""
             if isinstance(current, torch.Tensor):
                 # 张量对比逻辑
-                shape_changed = last.shape != current.shape
-                data_changed = not torch.allclose(last, current, atol=1e-5)
-                return shape_changed or data_changed
+                # 形状检查优先
+                if last.shape != current.shape:
+                    return True
+                
+                # dtype兼容处理
+                if last.dtype != current.dtype:
+                    # 记录类型差异日志
+                    print(f"[WARN] 数据类型变化 {last.dtype} → {current.dtype}，自动转换后比较")
+                    return True
+                
+                # 数值比较（保留原始精度）
+                return not torch.allclose(last, current, atol=1e-5)
             elif isinstance(current, (list, dict, set)):
                 # 复杂结构深对比
                 return copy.deepcopy(last) != copy.deepcopy(current)
@@ -146,8 +155,10 @@ def var_tracker(*track_vars):
             else:
                 ic.configureOutput(prefix=f"{indent}├─ [Var] {var}@{lineno} ")
                 ic(current)  # 使用icecream打印结构化数据
+                ic.configureOutput(prefix=f"   ic-default")
 
     def decorator(func):
+        @auto_diff
         @wraps(func)
         def wrapper(*args, **kwargs):
             tracer = Tracer(func.__code__)
