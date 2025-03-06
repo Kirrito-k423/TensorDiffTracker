@@ -4,6 +4,9 @@ from functools import wraps
 import torch
 import os
 import threading
+from icecream import ic 
+import copy
+
 # 线程局部存储保证多线程安全
 _local = threading.local()
 
@@ -74,36 +77,80 @@ def auto_diff(func):
 def var_tracker(*track_vars):
     """支持同时追踪多个变量的装饰器工厂"""
     class Tracer:
-        def __init__(self, track_list):
-            self.track_list = track_list  # 要追踪的变量名列表
+        def __init__(self, func_code):
+            self.target_code = func_code
+            self.track_list = track_vars  # 要追踪的变量名列表
             self.snapshots = {}  # 保存变量历史值
+            self.in_target = False  # 是否在目标函数作用域内
 
         def trace_changes(self, frame, event, arg):
             # 生成缩进前缀
             indent = IndentManager.get_indent()
-            if event == 'line':
+            if event == 'call':
+                if frame.f_code == self.target_code:
+                    self.in_target = True
+            elif event == 'return':
+                self.in_target = False
+            if frame.f_code == self.target_code:
+                self.in_target = True
+            if event == 'line' and self.in_target:
                 current_locals = frame.f_locals
                 for var in self.track_list:
                     if var in current_locals:
                         current_val = current_locals[var]
                         if self._is_modified(var, current_val):
-                            self.snapshots[var].append(current_val.clone())
-                            print(f"{indent}├─ [追踪] {var} 在行 {frame.f_lineno} 变化为 {current_val.shape}")
+                            self._log_change(var, current_val, frame.f_lineno, indent)
             return self.trace_changes
 
         def _is_modified(self, var, current):
-            if var not in self.snapshots:
-                self.snapshots[var] = []
-                return True  # 首次记录
-            last = self.snapshots[var][-1] if self.snapshots[var] else None
-            if last.shape != current.shape:  # 先检查形状变化
+            """智能类型感知对比方法"""
+            # 获取历史记录
+            history = self.snapshots.get(var, [])
+            last = history[-1] if history else None
+            
+            # 类型检查优先
+            current_type = type(current)
+            if last is None:
+                self.snapshots[var] = [self._create_snapshot(current)]
                 return True
-            return not torch.allclose(last, current, atol=1e-5) if last is not None else True
+            # 类型相同则具体对比
+            elif not isinstance(last, current_type) or self._compare_by_type(last, current):
+                # self.snapshots[var].append(self._create_snapshot(current))
+                self.snapshots[var] = [self._create_snapshot(current)]
+                return True
+            return False
+
+        def _create_snapshot(self, value):
+            """创建安全快照（防止引用变化）"""
+            return copy.deepcopy(value) if not isinstance(value, torch.Tensor) else value.clone()
+
+        def _compare_by_type(self, last, current):
+            """类型敏感对比逻辑"""
+            if isinstance(current, torch.Tensor):
+                # 张量对比逻辑
+                shape_changed = last.shape != current.shape
+                data_changed = not torch.allclose(last, current, atol=1e-5)
+                return shape_changed or data_changed
+            elif isinstance(current, (list, dict, set)):
+                # 复杂结构深对比
+                return copy.deepcopy(last) != copy.deepcopy(current)
+            else:
+                # 基础类型直接对比
+                return last != current
+
+        def _log_change(self, var, current, lineno, indent):
+            """类型感知的日志输出"""
+            if isinstance(current, torch.Tensor):
+                info = f"shape={current.shape} | dtype={current.dtype}"
+                print(f"{indent}├─ [Tensor] {var}@{lineno} → {info}")
+            else:
+                ic.configureOutput(prefix=f"{indent}├─ [Var] {var}@{lineno} ")
+                ic(current)  # 使用icecream打印结构化数据
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            tracer = Tracer(track_vars)
+            tracer = Tracer(func.__code__)
             sys.settrace(tracer.trace_changes)
             result = func(*args,**kwargs)
             sys.settrace(None)
