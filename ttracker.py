@@ -6,6 +6,7 @@ import os
 import threading
 from icecream import ic 
 import copy
+import numpy as np
 
 # 线程局部存储保证多线程安全
 _local = threading.local()
@@ -65,23 +66,37 @@ def auto_diff(func):
             sig = inspect.signature(func)
             bound_params = sig.bind(*args, **kwargs)
             for name, value in bound_params.arguments.items():
-                if isinstance(value, torch.Tensor):
-                    print(f"{indent}├─ 输入 [{name}] shape={value.shape}")
+                _log_change("├─ 输入", name, value, indent)
             
             # 执行函数
             result = func(*args, **kwargs)
-            
+
+
             # 结果追踪
             if isinstance(result, torch.Tensor):
                 print(f"{indent}└─ 输出 shape={result.shape}")
             elif isinstance(result, (tuple, list)):
                 for i, item in enumerate(result):
-                    if isinstance(item, torch.Tensor):
-                        print(f"{indent}└─ 输出[{i}] shape={item.shape}")
+                    _log_change("└─ 输出", i, item, indent)
             return result
         finally:
             IndentManager.decrease()
     return wrapper
+
+# prestr ├─
+def _log_change(prestr, name, value, indent, lineno=0):
+    """类型感知的日志输出"""
+    if isinstance(value, (torch.Tensor, np.ndarray)):
+        info = f"shape={value.shape} | dtype={value.dtype}"
+        print(f"{indent}{prestr} [Tensor] {name}@{lineno} → {info}")
+    elif isinstance(value, (list, dict, set)):
+        ic.configureOutput(prefix=f"{indent}{prestr} [Var] {name}@{lineno} ")
+        ic(len(value))  # 使用icecream打印结构化数据
+        ic.configureOutput(prefix=f"   ic: ")
+    elif isinstance(value, (int, float, str)):
+        ic.configureOutput(prefix=f"{indent}{prestr} [Var] {name}@{lineno} ")
+        ic(value)  # 使用icecream打印结构化数据
+        ic.configureOutput(prefix=f"   ic: ")
 
 def var_tracker(*track_vars):
     """支持同时追踪多个变量的装饰器工厂"""
@@ -108,7 +123,7 @@ def var_tracker(*track_vars):
                     if var in current_locals:
                         current_val = current_locals[var]
                         if self._is_modified(var, current_val):
-                            self._log_change(var, current_val, frame.f_lineno, indent)
+                            _log_change("├─", var, current_val, indent, frame.f_lineno)
             return self.trace_changes
 
         def _is_modified(self, var, current):
@@ -135,7 +150,7 @@ def var_tracker(*track_vars):
 
         def _compare_by_type(self, last, current):
             """类型敏感对比逻辑"""
-            if isinstance(current, torch.Tensor):
+            if isinstance(current, (torch.Tensor, np.ndarray)):
                 # 张量对比逻辑
                 # 形状检查优先
                 if last.shape != current.shape:
@@ -156,15 +171,6 @@ def var_tracker(*track_vars):
                 # 基础类型直接对比
                 return last != current
 
-        def _log_change(self, var, current, lineno, indent):
-            """类型感知的日志输出"""
-            if isinstance(current, torch.Tensor):
-                info = f"shape={current.shape} | dtype={current.dtype}"
-                print(f"{indent}├─ [Tensor] {var}@{lineno} → {info}")
-            else:
-                ic.configureOutput(prefix=f"{indent}├─ [Var] {var}@{lineno} ")
-                ic(current)  # 使用icecream打印结构化数据
-                ic.configureOutput(prefix=f"   ic-default")
 
     def decorator(func):
         @auto_diff
