@@ -62,7 +62,7 @@ def auto_diff(func):
         
         try:
             # 打印带类名的调用入口
-            print(f"{indent}┌── [{def_info}] 函数 [{func_identity}] 被调用于 {call_info} ({get_call_stack()})")
+            print(f"{indent}┌── [{def_info}] 函数 [{func_identity}] 被调用于 {call_info} ({get_call_stack()})", flush=True)
             # 参数追踪
             sig = inspect.signature(func)
             bound_params = sig.bind(*args, **kwargs)
@@ -77,30 +77,106 @@ def auto_diff(func):
 
             # 结果追踪
             if isinstance(result, torch.Tensor):
-                print(f"{indent}└─ 输出 shape={result.shape}")
+                print(f"{indent}└─ 输出 shape={result.shape}", flush=True)
             elif isinstance(result, (tuple, list)):
                 for i, item in enumerate(result):
                     _log_change("└─ 输出", i, item, indent)
-            print(f"{indent}└─ 耗时 {func.__name__} 执行耗时: {end_time - start_time:.4f} 秒")
+            print(f"{indent}└─ 耗时 {func_identity} 执行耗时: {end_time - start_time:.4f} 秒", flush=True)
             return result
         finally:
             IndentManager.decrease()
     return wrapper
+
+def extract_tensor_info(data, max_elements=25):
+    """递归提取数据结构的元信息，小张量直接打印数值"""
+    # 处理 PyTorch 张量
+    if isinstance(data, torch.Tensor):
+        if data.numel() <= max_elements:  # 元素总数 <= 25 (5x5)
+            # 将张量转为 Python 列表（确保在 CPU 上）
+            return data.detach().cpu().tolist()
+        else:
+            return {
+                "type": "Tensor",
+                "shape": tuple(data.shape),
+                "dtype": str(data.dtype)
+            }
+    
+    # 处理 NumPy 数组
+    if isinstance(data, np.ndarray):
+        if data.size <= max_elements:
+            return data.tolist()
+        else:
+            return {
+                "type": "ndarray",
+                "shape": data.shape,
+                "dtype": str(data.dtype)
+            }
+    
+    # 处理列表、元组（递归处理每个元素）
+    if isinstance(data, (list, tuple)):
+        return [extract_tensor_info(item, max_elements) for item in data]
+    
+    # 处理字典（递归处理每个键值对）
+    if isinstance(data, dict):
+        return {
+            key: extract_tensor_info(value, max_elements)
+            for key, value in data.items()
+        }
+    
+    # 处理集合（转换为列表后递归处理）
+    if isinstance(data, set):
+        return [extract_tensor_info(item, max_elements) for item in data]
+    
+    # 其他类型直接返回
+    return data
 
 # prestr ├─
 def _log_change(prestr, name, value, indent, lineno=0):
     """类型感知的日志输出"""
     if isinstance(value, (torch.Tensor, np.ndarray)):
         info = f"shape={value.shape} | dtype={value.dtype}"
-        print(f"{indent}{prestr} [Tensor] {name}@{lineno} → {info}")
+        print(f"{indent}{prestr} [Tensor] {name}@{lineno} → {info}", flush=True)
     elif isinstance(value, (list, dict, set)):
+        # print(f"{indent}{prestr} [Var] {name}@{lineno} → {len(value)}")
+        # 生成包含张量元信息的结构
+        simplified = extract_tensor_info(value)
+        # 使用 ic 打印结构化数据
         ic.configureOutput(prefix=f"{indent}{prestr} [Var] {name}@{lineno} ")
-        ic(len(value))  # 使用icecream打印结构化数据
-        ic.configureOutput(prefix=f"   ic: ")
+        ic(simplified)  # 显示嵌套结构的元信息
+        ic.configureOutput(prefix="   ic: ")
     elif isinstance(value, (int, float, str)):
+        # print(f"{indent}{prestr} [Var] {name}@{lineno} → {value}")
         ic.configureOutput(prefix=f"{indent}{prestr} [Var] {name}@{lineno} ")
         ic(value)  # 使用icecream打印结构化数据
         ic.configureOutput(prefix=f"   ic: ")
+
+def is_content_changed(last, current):
+    # 类型不同直接认为变化
+    if type(last) != type(current):
+        return True
+
+    # 处理张量（以 PyTorch 为例）
+    if isinstance(last, torch.Tensor):
+        return not torch.all(torch.eq(last, current)).item()
+
+    # 处理列表、元组等可迭代对象（递归比较元素）
+    if isinstance(last, (list, tuple)):
+        if len(last) != len(current):
+            return True
+        return any(is_content_changed(l, c) for l, c in zip(last, current))
+
+    # 处理字典（递归比较键和值）
+    if isinstance(last, dict):
+        if last.keys() != current.keys():
+            return True
+        return any(is_content_changed(last[k], current[k]) for k in last)
+
+    # 处理集合（转换为有序结构后比较）
+    if isinstance(last, set):
+        return set(sorted(last)) != set(sorted(current))
+
+    # 其他类型（如基本类型、字符串等）
+    return last != current
 
 def var_tracker(*track_vars):
     """支持同时追踪多个变量的装饰器工厂"""
@@ -141,8 +217,12 @@ def var_tracker(*track_vars):
             if last is None:
                 self.snapshots[var] = [self._create_snapshot(current)]
                 return True
+            elif not isinstance(last, current_type):
+                # self.snapshots[var].append(self._create_snapshot(current))
+                self.snapshots[var] = [self._create_snapshot(current)]
+                return True
             # 类型相同则具体对比
-            elif not isinstance(last, current_type) or self._compare_by_type(last, current):
+            elif self._compare_by_type(last, current):
                 # self.snapshots[var].append(self._create_snapshot(current))
                 self.snapshots[var] = [self._create_snapshot(current)]
                 return True
@@ -163,14 +243,14 @@ def var_tracker(*track_vars):
                 # dtype兼容处理
                 if last.dtype != current.dtype:
                     # 记录类型差异日志
-                    print(f"[WARN] 数据类型变化 {last.dtype} → {current.dtype}，自动转换后比较")
+                    print(f"[WARN] 数据类型变化 {last.dtype} → {current.dtype}，自动转换后比较", flush=True)
                     return True
                 
                 # 数值比较（保留原始精度）
                 return not torch.allclose(last, current, atol=1e-5)
             elif isinstance(current, (list, dict, set)):
                 # 复杂结构深对比
-                return copy.deepcopy(last) != copy.deepcopy(current)
+                return is_content_changed(copy.deepcopy(last), copy.deepcopy(current))
             else:
                 # 基础类型直接对比
                 return last != current
