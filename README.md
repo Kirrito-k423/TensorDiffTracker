@@ -38,7 +38,7 @@ Use `@var_tracker('target_var')` to automatically track specific variables acros
 ```python  
 from ttracker import var_tracker  
 
-@var_tracker('video_tensor')  
+@var_tracker('video')  
 def transform_video(video_tensor):  
     # ... video processing steps ...  
     return transformed_video  
