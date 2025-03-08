@@ -5,6 +5,7 @@ import torch
 import os
 import threading
 from icecream import ic 
+import time
 import copy
 import numpy as np
 
@@ -69,7 +70,9 @@ def auto_diff(func):
                 _log_change("├─ 输入", name, value, indent)
             
             # 执行函数
+            start_time = time.time()
             result = func(*args, **kwargs)
+            end_time = time.time()
 
 
             # 结果追踪
@@ -78,6 +81,7 @@ def auto_diff(func):
             elif isinstance(result, (tuple, list)):
                 for i, item in enumerate(result):
                     _log_change("└─ 输出", i, item, indent)
+            print(f"{indent}└─ 耗时 {func.__name__} 执行耗时: {end_time - start_time:.4f} 秒")
             return result
         finally:
             IndentManager.decrease()
