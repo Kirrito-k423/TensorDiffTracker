@@ -160,7 +160,7 @@ def is_content_changed(last, current):
         return not torch.all(torch.eq(last, current)).item()
 
     # 处理列表、元组等可迭代对象（递归比较元素）
-    if isinstance(last, (list, tuple)):
+    if isinstance(last, (list, tuple, tuple)):
         if len(last) != len(current):
             return True
         return any(is_content_changed(l, c) for l, c in zip(last, current))
@@ -248,11 +248,15 @@ def var_tracker(*track_vars):
                 
                 # 数值比较（保留原始精度）
                 return not torch.allclose(last, current, atol=1e-5)
-            elif isinstance(current, (list, dict, set)):
+            elif isinstance(current, (list, dict, set, tuple)):
                 # 复杂结构深对比
                 return is_content_changed(copy.deepcopy(last), copy.deepcopy(current))
             else:
                 # 基础类型直接对比
+                # ic(last)
+                # ic(current)
+                # ic(type(current))
+                # ic(type(last))
                 return last != current
 
 
