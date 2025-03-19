@@ -5,6 +5,13 @@ Track and visualize tensor changes across your code with ease.
 
 **Tensor Tracker** is a lightweight debugging tool designed to monitor the evolution of target tensors (PyTorch/NumPy) throughout your pipeline. It provides clear, hierarchical logs showing tensor transformations, variable values, and function call traces – helping you pinpoint shape, dtype, or value changes effortlessly.  
 
+
+## Install
+
+```
+pip install .
+```
+
 ## Quick Start  
 
 ### `auto_diff`: Automatic Input/Output Tracing  
