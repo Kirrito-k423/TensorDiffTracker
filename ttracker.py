@@ -9,6 +9,56 @@ import time
 import copy
 import numpy as np
 
+import logging
+import os
+import threading
+
+# 自定义处理器：根据 PID 和 TID 生成独立文件
+class ThreadFileHandler(logging.FileHandler):
+    def __init__(self, base_path):
+        self.base_path = base_path
+        super().__init__(self._get_filename(), mode='a')
+
+    def _get_filename(self):
+        pid = os.getpid()  # 获取进程 ID
+        tid = threading.get_ident()  # 获取线程 ID
+        return os.path.join(self.base_path, f"process_{pid}_thread_{tid}.log")
+
+# 配置日志
+def setup_logger():
+    # 创建日志目录（以主进程启动时间命名）
+    if "LTAG" in os.environ:
+        LTAG = os.environ["LTAG"]
+    else:
+        LTAG = "NOTAG"
+    log_dir = os.path.join("./logs", LTAG)
+    os.makedirs(log_dir, exist_ok=True)
+
+    # 配置日志记录器
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    handler = ThreadFileHandler(log_dir)
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
+
+logger = setup_logger()
+logger.info("Main process started.")
+
+def pskip():
+    # import torch.distributed as dist
+    # return dist.get_rank() == 0
+    return True
+
+def log2file(tmp):
+    # if "LOG2F" in os.environ:
+    logger.info(tmp)
+    # else:
+    if pskip():
+        print(tmp, flush=True)
+
+
 # 线程局部存储保证多线程安全
 _local = threading.local()
 
@@ -62,7 +112,7 @@ def auto_diff(func):
         
         try:
             # 打印带类名的调用入口
-            print(f"{indent}┌── [{def_info}] 函数 [{func_identity}] 被调用于 {call_info} ({get_call_stack()})", flush=True)
+            log2file(f"{indent}┌── [{def_info}] 函数 [{func_identity}] 被调用于 {call_info} ({get_call_stack()})")
             # 参数追踪
             sig = inspect.signature(func)
             bound_params = sig.bind(*args, **kwargs)
@@ -77,11 +127,11 @@ def auto_diff(func):
 
             # 结果追踪
             if isinstance(result, torch.Tensor):
-                print(f"{indent}└─ 输出 shape={result.shape}", flush=True)
+                log2file(f"{indent}└─ 输出 shape={result.shape}")
             elif isinstance(result, (tuple, list)):
                 for i, item in enumerate(result):
                     _log_change("└─ 输出", i, item, indent)
-            print(f"{indent}└─ 耗时 {func_identity} 执行耗时: {end_time - start_time:.4f} 秒", flush=True)
+            log2file(f"{indent}└─ 耗时 {func_identity} 执行耗时: {end_time - start_time:.4f} 秒")
             return result
         finally:
             IndentManager.decrease()
@@ -133,22 +183,27 @@ def extract_tensor_info(data, max_elements=25):
 # prestr ├─
 def _log_change(prestr, name, value, indent, lineno=0):
     """类型感知的日志输出"""
+    prefix_str=f"{indent}{prestr} [Var] {name}@{lineno} "
     if isinstance(value, (torch.Tensor, np.ndarray)):
         info = f"shape={value.shape} | dtype={value.dtype}"
-        print(f"{indent}{prestr} [Tensor] {name}@{lineno} → {info}", flush=True)
+        log2file(f"{indent}{prestr} [Tensor] {name}@{lineno} → {info}")
     elif isinstance(value, (list, dict, set)):
         # print(f"{indent}{prestr} [Var] {name}@{lineno} → {len(value)}")
         # 生成包含张量元信息的结构
         simplified = extract_tensor_info(value)
         # 使用 ic 打印结构化数据
-        ic.configureOutput(prefix=f"{indent}{prestr} [Var] {name}@{lineno} ")
-        ic(simplified)  # 显示嵌套结构的元信息
-        ic.configureOutput(prefix="   ic: ")
+        # if pskip():
+            # ic.configureOutput(prefix=prefix_str)
+            # ic(simplified)  # 显示嵌套结构的元信息
+            # ic.configureOutput(prefix="   ic: ")
+        log2file(prefix_str+str(simplified))
     elif isinstance(value, (int, float, str)):
         # print(f"{indent}{prestr} [Var] {name}@{lineno} → {value}")
-        ic.configureOutput(prefix=f"{indent}{prestr} [Var] {name}@{lineno} ")
-        ic(value)  # 使用icecream打印结构化数据
-        ic.configureOutput(prefix=f"   ic: ")
+        # if pskip():
+            # ic.configureOutput(prefix=prefix_str)
+            # ic(value)  # 使用icecream打印结构化数据
+            # ic.configureOutput(prefix=f"   ic: ")
+        log2file(prefix_str+str(value))
 
 def is_content_changed(last, current):
     # 类型不同直接认为变化
@@ -243,7 +298,7 @@ def var_tracker(*track_vars):
                 # dtype兼容处理
                 if last.dtype != current.dtype:
                     # 记录类型差异日志
-                    print(f"[WARN] 数据类型变化 {last.dtype} → {current.dtype}，自动转换后比较", flush=True)
+                    log2file(f"[WARN] 数据类型变化 {last.dtype} → {current.dtype}，自动转换后比较")
                     return True
                 
                 # 数值比较（保留原始精度）
