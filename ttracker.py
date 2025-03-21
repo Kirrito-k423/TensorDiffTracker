@@ -12,20 +12,31 @@ import numpy as np
 import logging
 import os
 import threading
+import inspect
+from functools import wraps
+import os
+import threading
+import logging
 
-# 自定义处理器：根据 PID 和 TID 生成独立文件
-class ThreadFileHandler(logging.FileHandler):
+class ThreadFileHandler(logging.Handler):
     def __init__(self, base_path):
+        super().__init__()
         self.base_path = base_path
-        super().__init__(self._get_filename(), mode='a')
+        self.formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
-    def _get_filename(self):
-        pid = os.getpid()  # 获取进程 ID
-        tid = threading.get_ident()  # 获取线程 ID
-        return os.path.join(self.base_path, f"process_{pid}_thread_{tid}.log")
+    def emit(self, record):
+        # 动态生成当前进程和线程的文件名
+        pid = os.getpid()
+        tid = threading.get_ident()
+        filename = os.path.join(self.base_path, f"process_{pid}_thread_{tid}.log")
+        # 确保日志目录存在
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        # 写入日志
+        with open(filename, 'a', encoding='utf-8') as f:
+            msg = self.formatter.format(record)
+            f.write(msg + '\n')
 
-# 配置日志
-def setup_logger():
+def h4logger():
     # 创建日志目录（以主进程启动时间命名）
     if "LTAG" in os.environ:
         LTAG = os.environ["LTAG"]
@@ -34,13 +45,17 @@ def setup_logger():
     log_dir = os.path.join("./logs", LTAG)
     os.makedirs(log_dir, exist_ok=True)
 
+    handler = ThreadFileHandler(log_dir)
+    return handler
+
+def setup_logger():
     # 配置日志记录器
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
-    handler = ThreadFileHandler(log_dir)
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    # 移除已有的Handler，避免重复
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    logger.addHandler(h4logger())
     return logger
 
 logger = setup_logger()
@@ -55,8 +70,8 @@ def log2file(tmp):
     # if "LOG2F" in os.environ:
     logger.info(tmp)
     # else:
-    if pskip():
-        print(tmp, flush=True)
+    # if pskip():
+    #     print(tmp, flush=True)
 
 
 # 线程局部存储保证多线程安全
@@ -327,6 +342,17 @@ def var_tracker(*track_vars):
         return wrapper
     return decorator
 
+
+
+def fstack(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        stack = inspect.stack()
+        log2file(f"【Call Stack for {func.__name__}】")
+        for frame in reversed(stack[1:]):  # 排除装饰器自身调用层
+            log2file(f"-> {frame.function}() at {frame.filename}:{frame.lineno}")
+        return func(*args,**kwargs)
+    return wrapper
 # 使用示例：同时监控变量A和B的变化
 # @var_tracker('A', 'B')
 # @auto_diff
