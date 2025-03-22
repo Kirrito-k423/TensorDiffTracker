@@ -342,7 +342,57 @@ def var_tracker(*track_vars):
         return wrapper
     return decorator
 
+import sys
+import inspect
+from functools import wraps
 
+def safe_getsourcelines(code):
+    """带异常处理的源码获取函数"""
+    try:
+        return inspect.getsourcelines(code)
+    except (OSError, TypeError):
+        return None, 0
+
+def trace_lines(frame, event, arg):
+    indent = IndentManager.get_indent()
+    if event == 'line':
+        code = frame.f_code
+        lines, first_line = safe_getsourcelines(code)
+        
+        if lines and frame.f_lineno - first_line < len(lines):
+            line_content = lines[frame.f_lineno - first_line].strip()
+            log2file(f"{indent}├── [行 {frame.f_lineno}] {line_content}")
+
+        else:
+            line_content = "[动态生成代码]"
+            
+    return trace_lines
+
+
+def trace_calls(frame, event, arg):
+    indent = IndentManager.get_indent()
+    if event == 'call':
+        func_name = frame.f_code.co_name
+        if func_name != '<module>':
+            log2file(f"{indent}┌── 进入函数: {func_name}()")
+            IndentManager.increase()
+            sys.settrace(trace_lines)
+    elif event == 'return':
+        func_name = frame.f_code.co_name
+        if func_name != '<module>':
+            IndentManager.decrease()
+            log2file(f"{indent}└── 退出函数: {func_name}()")
+    return trace_calls
+
+def debug_trace(func):
+    @wraps(func)
+    def wrapper(*args,**kwargs):
+        log2file(f"【debug_trace for {func.__name__}】")
+        sys.settrace(trace_calls)
+        result = func(*args, **kwargs)
+        sys.settrace(None)
+        return result
+    return wrapper
 
 def fstack(func):
     @wraps(func)
