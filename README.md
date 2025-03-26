@@ -71,6 +71,18 @@ def transform_video(video_tensor):
 logger.addHandler(h4logger())
 
 log2file(f"xx is {xxx}")
+
+from ttracker import _log_change
+_log_change("attention", "attn_output", attn_output, "", 0)
+```
+
+
+### check_run_count
+
+```py
+def check_run_count(unique_id, max_allow, remove_when_exit=True):
+    """
+    检查运行次数，达到 max_allow 次后退出程序。
 ```
 
 ## Key Features  
