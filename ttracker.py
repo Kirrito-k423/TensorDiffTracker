@@ -18,6 +18,43 @@ import os
 import threading
 import logging
 
+
+def check_run_count(unique_id, max_allow, remove_when_exit=True):
+    """
+    检查运行次数，达到 max_allow 次后退出程序。
+
+    参数:
+        unique_id (str): 唯一标识符，用于生成独立的计数文件。
+        max_allow (int): 允许的最大运行次数。
+        remove_when_exit (bool): 退出时是否删除计数文件（默认删除）。
+    """
+    # 生成唯一文件名
+    pid = os.getpid()
+    tid = threading.get_ident()
+    count_file = f"/tmp/run_count_{pid}_{tid}_{unique_id}.txt"
+
+    # 读取当前计数
+    try:
+        with open(count_file, "r") as f:
+            current_count = int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        current_count = 0
+
+    # 判断是否达到最大允许次数
+    if current_count >= max_allow:
+        if remove_when_exit:
+            try:
+                os.remove(count_file)
+            except FileNotFoundError:
+                pass
+        print(f"[{unique_id}] 已达到最大运行次数 {max_allow}，程序退出。")
+        exit(1)
+    else:
+        # 更新计数并写入文件
+        with open(count_file, "w") as f:
+            f.write(str(current_count + 1))
+        print(f"[{unique_id}] 当前运行次数: {current_count + 1}/{max_allow}")
+
 class ThreadFileHandler(logging.Handler):
     def __init__(self, base_path):
         super().__init__()
@@ -42,7 +79,7 @@ def h4logger():
         LTAG = os.environ["LTAG"]
     else:
         LTAG = "NOTAG"
-    log_dir = os.path.join("./logs", LTAG)
+    log_dir = os.path.join("/home/t00906153/logs", LTAG)
     os.makedirs(log_dir, exist_ok=True)
 
     handler = ThreadFileHandler(log_dir)
