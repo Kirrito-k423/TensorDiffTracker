@@ -63,7 +63,15 @@ def transform_video(video_tensor):
 │   │   │   ├─ [Tensor] video@574 → shape=torch.Size([73, 720, 960, 3]) | dtype=torch.uint8
 │   │   │   ├─ [Tensor] video@575 → shape=torch.Size([73, 3, 720, 960]) | dtype=torch.uint8
 │   │   │   ├─ [Tensor] video@572 → shape=(73, 720, 960, 3) | dtype=uint8
-```  
+```
+
+### Log2file
+
+```py
+logger.addHandler(h4logger())
+
+log2file(f"xx is {xxx}")
+```
 
 ## Key Features  
 • **Hierarchical Logging:** See function call chains and tensor evolution in a tree structure.  
@@ -74,3 +82,18 @@ def transform_video(video_tensor):
 ---
 
 **Debug smarter, not harder** – Tensor Tracker helps you see the unseen in complex tensor pipelines. 🚀
+
+## Example 
+
+### Accuracy monitor
+
+```py
+def check_hook(module, input, output):
+    from ttracker import _log_change
+    _log_change(f"{module.__class__.__name__}", "input", input, "", 0)
+    _log_change(f"{module.__class__.__name__}", "output", output, "", 0)
+        
+print(model_executable)
+for name, layer in model_executable.named_modules():
+    layer.register_forward_hook(check_hook)
+```
