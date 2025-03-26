@@ -71,7 +71,7 @@ def log2file(tmp):
     logger.info(tmp)
     # else:
     # if pskip():
-    #     print(tmp, flush=True)
+    print(tmp, flush=True)
 
 
 # 线程局部存储保证多线程安全
@@ -142,7 +142,7 @@ def auto_diff(func):
 
             # 结果追踪
             if isinstance(result, torch.Tensor):
-                log2file(f"{indent}└─ 输出 shape={result.shape}")
+                _log_change("└─ 输出", "output", result, indent)
             elif isinstance(result, (tuple, list)):
                 for i, item in enumerate(result):
                     _log_change("└─ 输出", i, item, indent)
@@ -163,7 +163,11 @@ def extract_tensor_info(data, max_elements=25):
             return {
                 "type": "Tensor",
                 "shape": tuple(data.shape),
-                "dtype": str(data.dtype)
+                "dtype": str(data.dtype),
+                "sum": data.sum(),
+                "mean": data.mean(),
+                "min": data.min(),
+                "max": data.max()
             }
     
     # 处理 NumPy 数组
@@ -200,7 +204,7 @@ def _log_change(prestr, name, value, indent, lineno=0):
     """类型感知的日志输出"""
     prefix_str=f"{indent}{prestr} [Var] {name}@{lineno} "
     if isinstance(value, (torch.Tensor, np.ndarray)):
-        info = f"shape={value.shape} | dtype={value.dtype}"
+        info = f"\t shape={value.shape} | dtype={value.dtype}  | sum={value.sum()}  | mean={value.mean()}  | min={value.min()}  | max={value.max()}"
         log2file(f"{indent}{prestr} [Tensor] {name}@{lineno} → {info}")
     elif isinstance(value, (list, dict, set)):
         # print(f"{indent}{prestr} [Var] {name}@{lineno} → {len(value)}")
